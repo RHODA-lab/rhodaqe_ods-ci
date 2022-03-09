@@ -1,6 +1,6 @@
-# ODS-CI
+# ODA-CI
 
-ODS-CI is a framework to test Red Hat Open Data Science features and functionality
+ODA-CI is a framework to test Red Hat Open Data Science features and functionality
 using QE tiered testing.
 
 # Requirements
@@ -40,5 +40,3 @@ See build [README](build/README.md) on how you can build a container to run ODS-
 
 # License
 This project is open sourced under MIT License.
-END
-AAA
