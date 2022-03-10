@@ -39,4 +39,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md)
 See build [README](build/README.md) on how you can build a container to run ODS-CI automation in OpenShift.
 
 # License
-This project is open sourced under MIT License.
+This project is open sourced under MIT License. END
