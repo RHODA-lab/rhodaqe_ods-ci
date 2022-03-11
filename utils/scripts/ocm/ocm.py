@@ -45,6 +45,10 @@ class OpenshiftClusterManager():
         self.ldap_test_password = args.get("ldap_test_password")
         self.idp_type = args.get("idp_type")
         self.idp_name = args.get("idp_name")
+        self.pool_instance_type = args.get("pool_instance_type")
+        self.pool_node_count = args.get("pool_node_count")
+        self.taints = args.get("taints")
+        self.pool_name = args.get("pool_name")
 
         ocm_env = glob.glob(dir_path+"/../../../ocm.json.*")
         if ocm_env != []:
@@ -52,7 +56,7 @@ class OpenshiftClusterManager():
             match = re.search(r'.*\.(\S+)', (os.path.basename(ocm_env[0])))
             if match is not None:
                 self.testing_platform = match.group(1)
- 
+
     def _is_ocmcli_installed(self):
         """Checks if ocm cli is installed"""
         cmd = "ocm version"
@@ -116,7 +120,7 @@ class OpenshiftClusterManager():
                 chan_grp = ""
                 if (self.channel_group == "candidate"):
                     chan_grp = "--channel-group {}".format(self.channel_group)
-                 
+
                 version_cmd = "ocm list versions {} | grep -w \"".format(chan_grp) + re.escape(version) + "*\""
                 log.info("CMD: {}".format(version_cmd))
                 versions = execute_command(version_cmd)
@@ -134,7 +138,7 @@ class OpenshiftClusterManager():
             if ((self.channel_group == "stable") or (self.channel_group == "candidate")):
                 if version == "":
                     log.error(("Please enter openshift version as argument."
-                               "Channel group option is used along with openshift version."))    
+                               "Channel group option is used along with openshift version."))
                     sys.exit(1)
                 else:
                     channel_grp = "--channel-group {} ".format(self.channel_group)
@@ -149,7 +153,7 @@ class OpenshiftClusterManager():
                            self.aws_access_key_id,
                            self.aws_secret_access_key,
                            self.aws_region, self.num_compute_nodes,
-                           self.aws_instance_type, version, 
+                           self.aws_instance_type, version,
                            channel_grp, self.cluster_name))
         log.info("CMD: {}".format(cmd))
         ret = execute_command(cmd)
@@ -306,6 +310,22 @@ class OpenshiftClusterManager():
             log.info("regex failed in get_addon_state")
             return None
         return match.group(1).strip()
+
+    def add_machine_pool(self):
+        """Adds machine pool to the given cluster"""
+        cmd = ("ocm create machinepool --cluster {} "
+               "--instance-type {} --replicas {} "
+               "--taints {} "
+               "{}".format(self.cluster_name,
+                           self.pool_instance_type,
+                           self.pool_node_count, self.taints,
+                           self.pool_name))
+        log.info("CMD: {}".format(cmd))
+        ret = execute_command(cmd)
+        if ret is None:
+            log.info("Failed to add machine pool {}".format(self.cluster_name))
+            sys.exit(1)
+        time.sleep(60)
 
     def wait_for_addon_installation_to_complete(self, addon_name="managed-odh",
                                                 timeout=3600):
@@ -560,6 +580,13 @@ class OpenshiftClusterManager():
         # Waiting 5 minutes to ensure all the services are up
         time.sleep(300)
 
+    def install_gpu_addon(self):
+        if not self.is_addon_installed(addon_name="gpu-operator-certified-addon"):
+            self.install_addon(addon_name="gpu-operator-certified-addon")
+            self.wait_for_addon_installation_to_complete(addon_name="gpu-operator-certified-addon")
+        # Waiting 5 minutes to ensure all the services are up
+        time.sleep(300)
+
     def uninstall_rhods_addon(self):
         self.uninstall_rhods()
         self.wait_for_addon_uninstallation_to_complete()
@@ -611,6 +638,17 @@ class OpenshiftClusterManager():
             log.info("{} not deleted even after an hour."
                    " EXITING".format(self.cluster_name))
             sys.exit(1)
+
+    def install_rhoda_addon(self):
+        if not self.is_addon_installed("dbaas-operator"):
+            self.install_addon("dbaas-operator")
+            self.wait_for_addon_installation_to_complete("dbaas-operator")
+        # Waiting 5 minutes to ensure all the services are up
+        time.sleep(300)
+
+    def uninstall_rhoda_addon(self):
+        self.uninstall_rhoda("dbaas-operator")
+        self.wait_for_addon_uninstallation_to_complete("dbaas-operator")
 
 if __name__ == "__main__":
 
@@ -777,6 +815,52 @@ if __name__ == "__main__":
             required=True)
         install_rhods_parser.set_defaults(func=ocm_obj.install_rhods_addon)
 
+        #Argument parsers for install_rhods_addon
+        install_gpu_parser = subparsers.add_parser(
+            'install_gpu_addon',
+            help=("Install gpu addon cluster."),
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        required_install_gpu_parser = install_gpu_parser.add_argument_group('required arguments')
+
+        required_install_gpu_parser.add_argument("--cluster-name",
+            help="osd cluster name",
+            action="store", dest="cluster_name",
+            required=True)
+        install_gpu_parser.set_defaults(func=ocm_obj.install_gpu_addon)
+
+        #Argument parsers for create_cluster
+        add_machinepool_parser = subparsers.add_parser(
+            'add_machine_pool',
+            help=("Adds machine pool to given cluster via OCM."),
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+        optional_machinepool_cluster_parser = add_machinepool_parser._action_groups.pop()
+        required_machinepool_cluster_parser = add_machinepool_parser.add_argument_group('required arguments')
+        add_machinepool_parser._action_groups.append(optional_machinepool_cluster_parser)
+
+        required_machinepool_cluster_parser.add_argument("--cluster-name",
+            help="osd cluster name",
+            action="store", dest="cluster_name",
+            required=True)
+
+        optional_machinepool_cluster_parser.add_argument("--instance-type",
+            help="Machine pool instance type",
+            action="store", dest="pool_instance_type", metavar="",
+            default="g4dn.xlarge")
+        optional_machinepool_cluster_parser.add_argument("--worker-node-count",
+            help="Machine pool worker node count",
+            action="store", dest="pool_node_count", metavar="",
+            default="1")
+        optional_machinepool_cluster_parser.add_argument("--taints",
+            help="Machine pool taints information",
+            action="store", dest="taints", metavar="",
+            default="nvidia.com/gpu=NONE:NoSchedule")
+        optional_machinepool_cluster_parser.add_argument("--pool-name",
+            help="Machine pool name",
+            action="store", dest="pool_name", metavar="",
+            default="gpunode")
+        add_machinepool_parser.set_defaults(func=ocm_obj.add_machine_pool)
+
         #Argument parsers for uninstall_rhods_addon
         uninstall_rhods_parser = subparsers.add_parser(
             'uninstall_rhods_addon',
@@ -790,6 +874,29 @@ if __name__ == "__main__":
             required=True)
         uninstall_rhods_parser.set_defaults(func=ocm_obj.uninstall_rhods_addon)
 
+        # Argument parsers for install_rhoda_addon
+        install_rhoda_parser = subparsers.add_parser(
+            'install_rhoda_addon',
+            help=("Install rhoda addon cluster."),
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        required_install_rhoda_parser = install_rhoda_parser.add_argument_group('required arguments')
+        required_install_rhoda_parser.add_argument("--cluster-name",
+                                                   help="osd cluster name",
+                                                   action="store", dest="cluster_name",
+                                                   required=True)
+        install_rhoda_parser.set_defaults(func=ocm_obj.install_rhoda_addon)
+
+        # Argument parsers for uninstall_rhoda_addon
+        uninstall_rhoda_parser = subparsers.add_parser(
+            'uninstall_rhoda_addon',
+            help=("Uninstall rhoda addon cluster."),
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        required_uninstall_rhoda_parser = uninstall_rhoda_parser.add_argument_group('required arguments')
+        required_uninstall_rhoda_parser.add_argument("--cluster-name",
+                                                     help="osd cluster name",
+                                                     action="store", dest="cluster_name",
+                                                     required=True)
+        uninstall_rhoda_parser.set_defaults(func=ocm_obj.uninstall_rhoda_addon)
         #Argument parsers for create_idp
         create_idp_parser = subparsers.add_parser(
             'create_idp',
